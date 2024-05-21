@@ -1,0 +1,4 @@
+*.wav
+node_modules/
+myenv/
+myenv2/
