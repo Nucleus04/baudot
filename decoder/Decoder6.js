@@ -199,7 +199,7 @@ class Baudot extends Transform {
 
   countBytesFromFrequencyCounter() {
     if (this.frequencyCounter >= this.counterDivisor) {
-      return Math.round(this.frequencyCounter / this.counterDivisor);
+      return Math.floor(this.frequencyCounter / this.counterDivisor);
     } else {
       if (this.frequencyCounter >= 3) {
         return 1;
@@ -257,6 +257,7 @@ class Baudot extends Transform {
         console.log(`Frequency ${this.currentFrequency} is not supported`);
       }
     }
+    
   }
 
   extractBaudotBit(input) {

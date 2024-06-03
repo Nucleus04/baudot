@@ -1,38 +1,51 @@
 const fs = require("fs");
-const Baudot = require("./Decoder5");
-
-/**
- * Usecase one
- * using pipe
- */
-
-// const baudot = new Baudot({
-//   sampleRate: 8000,
-//   durationPerDetection: 5,
-//   code: "US_TTY",
-// });
-// const file = fs.createReadStream("./test.wav");
-// // const file = fs.createReadStream("aaaaa.wav");
-// file.pipe(baudot);
-
-// baudot.on("data", (chunk) => {
-//   process.stdout.write(chunk.toString());
-// });
-
-// baudot.on("end", () => {
-//   console.log("Nice one!!");
-// });
-
-/**
- * Usecase 2 - with delay on transmision and limited amount of chunk
- * using ".write"
- */
+const Baudot = require("./Decoder6");
+const { spawn } = require("child_process");
 
 let delay = 0;
 
-const file = fs.createReadStream("./563.wav", {
-  highWaterMark: 1000,
+const ffmpegArgs = [
+  "-f",
+  "mulaw",
+  "-ar",
+  "8000",
+  "-i",
+  "pipe:0",
+  "-af",
+  "compand=attacks=0:points=-30/-15|-1/-15|0/-3:gain=1",
+  "-f",
+  "mulaw",
+  "-ar",
+  "8000",
+  "pipe:1",
+];
+
+const ffmpegProccess = spawn("ffmpeg", ffmpegArgs);
+
+ffmpegProccess.stdout.on("data", function (chunk) {
+  baudot.write(chunk);
 });
+ffmpegProccess.stdout.on("end", function () {
+  baudot._final();
+});
+
+const file = fs.createReadStream(
+  // "./tty/+17035960046-+18559215457-CA4e3727f4b19acb480a0df4fa3c6dda89.wav",
+  // "./tty/+17035960046-+18559215457-CA5d52e76d069b76c8e83e446b120bd4e9.wav",
+  // "./tty/+17035960046-+18559215457-CA9af64b43866708d681101772ef2d3f7d.wav",
+  // "./tty/+17035960046-+18559215457-CA298e98fe502865c3d2246ee57db437eb.wav",
+  // "./tty/+17035960046-+18559215457-CAbb652717ea69d475a44b689faabd973a.wav",
+  // "./tty/+17035960046-+18559215457-CAff7e7c1f883f316e5e0968081db58fdb.wav",
+  // "./tty/normalized.wav",
+  // "./tty/output.wav",
+  // "./911.wav",
+  // "./finalOutput.wav",
+  "hi_angeltty.wav",
+  {
+    highWaterMark: 20,
+  }
+);
+
 const baudot = new Baudot({
   sampleRate: 8000,
   durationPerDetection: 5,
@@ -41,47 +54,19 @@ const baudot = new Baudot({
 
 process.stdout.write("\n");
 file.on("data", (chunk) => {
-  setTimeout(() => {
-    baudot.write(chunk);
-  }, delay);
-  delay = delay + 20;
+  ffmpegProccess.stdin.write(chunk);
+  // baudot.write(chunk);
 });
 
 file.on("end", () => {
-  setTimeout(() => {
-    baudot._final(); //required to invoked to read the last character remaning
-    // respond(); //Automate reponse by reading another baudot wav
-    process.stdout.write("\n");
-  }, delay);
+  ffmpegProccess.stdin.end();
+  // baudot._final();
+  // setTimeout(() => {
+  //   baudot._final();
+  //   process.stdout.write("\n");
+  // }, delay + 1000);
 });
+
 baudot.on("data", (chunk) => {
   process.stdout.write(chunk.toString());
 });
-
-// function respond() {
-//   process.stdout.write("\n\nCaller : ");
-//   const decoder = new Baudot({
-//     sampleRate: 8000,
-//     durationPerDetection: 5,
-//     code: "US_TTY",
-//   });
-//   const file2 = fs.createReadStream("912.wav", { highWaterMark: 160 });
-//   let delay2 = 20;
-//   file2.on("data", (chunk) => {
-//     setTimeout(() => {
-//       decoder.write(chunk);
-//     }, delay2);
-//     delay2 = delay2 + 20;
-//   });
-
-//   decoder.on("data", (chunk) => {
-//     process.stdout.write(chunk.toString());
-//   });
-
-//   file2.on("end", () => {
-//     setTimeout(() => {
-//       decoder._final();
-//       process.stdout.write("\n");
-//     }, delay2);
-//   });
-// }

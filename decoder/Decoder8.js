@@ -1,6 +1,8 @@
 const fs = require("fs");
+const EventEmitter = require("events");
 // const map = JSON.parse(fs.readFileSync(`./codes/${this.ttyCode}/letter.json`));
 const { Transform } = require("stream");
+const { spawn } = require("child_process");
 
 const BAUDOT_BYTE_LENGTH = 7;
 const HIGH_FREQUENCY_REFERENCE = 1800;
@@ -199,7 +201,7 @@ class Baudot extends Transform {
 
   countBytesFromFrequencyCounter() {
     if (this.frequencyCounter >= this.counterDivisor) {
-      return Math.round(this.frequencyCounter / this.counterDivisor);
+      return Math.floor(this.frequencyCounter / this.counterDivisor);
     } else {
       if (this.frequencyCounter >= 3) {
         return 1;
@@ -290,4 +292,62 @@ class Baudot extends Transform {
   }
 }
 
-module.exports = Baudot;
+const ffmpegArgs = [
+  "-f",
+  "mulaw",
+  "-ar",
+  "8000",
+  "-i",
+  "pipe:0",
+  "-af",
+  "compand=attacks=0:points=-30/-15|-1/-15|0/-3:gain=1",
+  "-f",
+  "mulaw",
+  "-ar",
+  "8000",
+  "pipe:1",
+];
+
+class Decoder extends EventEmitter {
+  constructor() {
+    super();
+    this.baudot = new Baudot({
+      sampleRate: 8000,
+      durationPerDetection: 5,
+      code: "US_TTY",
+    });
+
+    this.Normalizer = spawn("ffmpeg", ffmpegArgs);
+    this.ffmpegListener();
+    this.output();
+  }
+
+  ffmpegListener() {
+    this.Normalizer.stdout.on("data", (data) => {
+      this.baudot.write(data);
+    });
+    this.Normalizer.stdout.on("end", () => {
+      this.baudot._final();
+    });
+    this.Normalizer.stderr.on("data", (data) => {
+      //   console.log(`stderr: ${data}`);
+    });
+    this.Normalizer.on("close", (code) => {
+      //   console.log(`child process exited with code ${code}`);
+    });
+  }
+
+  feed(chunk) {
+    this.Normalizer.stdin.write(chunk);
+  }
+  end() {
+    this.Normalizer.stdin.end();
+  }
+
+  output() {
+    this.baudot.on("data", (chunk) => {
+      this.emit("character", chunk.toString());
+    });
+  }
+}
+module.exports = Decoder;

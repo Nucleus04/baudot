@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const Baudot = require("./Decoder5");
+const Baudot = require("./Decoder7");
 
 function processWavFiles(directoryPath) {
   return new Promise((resolve, reject) => {
@@ -25,10 +25,10 @@ function processWavFiles(directoryPath) {
         }
 
         const file = wavFiles[index];
-        console.log(file);
+        // console.log(file);
         const filePath = path.join(directoryPath, file);
         const inputFile = fs.createReadStream(filePath, {
-          highWaterMark: 10000,
+          highWaterMark: 20,
         });
         const baudot = new Baudot({
           sampleRate: 8000,
@@ -73,7 +73,7 @@ function processWavFiles(directoryPath) {
 }
 
 // Example usage:
-const directoryPath = "./2024-05-10";
+const directoryPath = "./tty";
 processWavFiles(directoryPath)
   .then(() => {
     console.log("All files processed successfully.");

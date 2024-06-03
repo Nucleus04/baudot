@@ -1,10 +1,29 @@
 const fs = require("fs");
 // const map = JSON.parse(fs.readFileSync(`./codes/${this.ttyCode}/letter.json`));
 const { Transform } = require("stream");
+const { spawn } = require("child_process");
 
 const BAUDOT_BYTE_LENGTH = 7;
 const HIGH_FREQUENCY_REFERENCE = 1800;
 const LOW_FREQUENCY_REFERENCE = 1400;
+
+const ffmpegArgs = [
+  "-f",
+  "mulaw", // Specify the input format as mu-law
+  "-ar",
+  "8000", // Set the audio sample rate
+  // '-ac', '1',     // Set the number of audio channels (1 for mono)
+  "-i",
+  "pipe:0", // Use stdin as input
+  "-af",
+  "compand=attacks=0:points=-30/-15|-1/-15|0/-3:gain=1", // Apply the compand filter
+  "-f",
+  "mulaw", // Specify the output format as mu-law
+  "-ar",
+  "8000", // Set the output audio sample rate
+  // '-ac', '1',     // Set the number of output audio channels (1 for mono)
+  "pipe:1", // Output to stdout
+];
 
 class Baudot extends Transform {
   /**
@@ -40,8 +59,35 @@ class Baudot extends Transform {
     this.buffer = null;
     this.isStreamStarted = false;
     this.zeroFrequencyCounter = 0;
+    this.ffmpegNormalize = spawn("ffmpeg", ffmpegArgs);
+    this.ffmpegListeners();
   }
 
+  /**
+   * 2. This function is will normalize the audio chunks volume and set the
+   * output to buffer which will be consumed by the startDecoding function.
+   */
+  ffmpegListeners() {
+    this.ffmpegNormalize.stdout.on("data", (chunk) => {
+      if (!this.isStreamStarted) {
+        this.buffer = chunk;
+        this.isStreamStarted = true;
+      } else {
+        this.buffer = Buffer.concat([this.buffer, chunk]);
+      }
+    });
+    this.ffmpegNormalize.stderr.on("data", (data) => {
+      //   this.push(data);
+    });
+    this.ffmpegNormalize.on("close", (code) => {
+      //   this.push(null);
+    });
+  }
+
+  /**
+   * 3. This function will get the stored normalized chunks on buffer , slice it based on chunk size,
+   * update the current buffer then pass the sliced chunk to detect function.
+   */
   startDecoding() {
     while (this.buffer && this.chunkSize <= this.buffer.length) {
       let inputBuffer = this.buffer.slice(0, this.chunkSize);
@@ -49,20 +95,26 @@ class Baudot extends Transform {
       this.detect(inputBuffer);
     }
   }
+
+  /**
+   * 1. this function will listen for incoming input chunks then
+   * it will pass the chunks to the ffmpegNormalize function to normalize the volume
+   * then it will also start the startDecoding function.
+   * @param {*} chunk
+   * @param {*} encoding
+   * @param {*} callback
+   */
   _transform(chunk, encoding, callback) {
-    if (!this.isStreamStarted) {
-      this.buffer = chunk;
-      this.isStreamStarted = true;
-    } else {
-      this.buffer = Buffer.concat([this.buffer, chunk]);
-    }
+    this.ffmpegNormalize.stdin.write(chunk);
     this.startDecoding();
     callback();
   }
   _final() {
+    this.ffmpegNormalize.stdin.end();
     if (this.frequencyCounter > this.counterDivisor) {
       this.frequencyCounter = this.frequencyCounter + this.counterDivisor;
-      this.frequencyDetection();
+
+      this.proccessStoredFrequency();
     }
   }
   reset() {
@@ -81,42 +133,47 @@ class Baudot extends Transform {
     this.zeroFrequencyCounter = 0;
     return;
   }
+
   detect(chunk) {
     const audioData = Array.from(chunk, (byte) => byte / 128 - 1);
     const frequency = this.calculateFrequency(audioData);
-    // console.log(this.frequencyCounter);
-    if (frequency === 0) {
-      // if (this.zeroFrequencyCounter > 30) {
-      //   this.reset();
-      // } else {
-      //   this.zeroFrequencyCounter++;
-      // }
-    } else {
-      this.zeroFrequencyCounter = 0;
-      if (
-        frequency >= HIGH_FREQUENCY_REFERENCE ||
-        (frequency <= LOW_FREQUENCY_REFERENCE && frequency >= 500)
-      ) {
+    if (frequency != 0) {
+      const isValidFrequency = this.isValidFrequency(frequency);
+      if (isValidFrequency) {
         this.frequencyBuffer.push(frequency);
         if (this.isFirstCheck) {
-          this.isFirstCheck = false;
-          this.frequencyCounter++;
-          this.isHeaderChecking = true;
+          this.firstCheck();
           this.setCurrentFrequencyLevel(frequency);
-        }
-        if (this.isThereChangesFrequency(frequency)) {
-          this.frequencyDetection();
-          this.setCurrentFrequencyLevel(frequency);
-          this.frequencyCounter = 1;
         } else {
-          this.frequencyCounter++;
+          const isFrequencyChange = this.checkFrequencyChange(frequency);
+          if (isFrequencyChange) {
+            this.proccessStoredFrequency();
+            this.setCurrentFrequencyLevel(frequency);
+            this.frequencyCounter = 1;
+          } else {
+            this.frequencyCounter++;
+          }
         }
       } else {
         // console.log("Incompatible frequency", frequency);
       }
     }
+  }
 
-    // }
+  isValidFrequency(frequency) {
+    if (
+      frequency >= HIGH_FREQUENCY_REFERENCE ||
+      (frequency <= LOW_FREQUENCY_REFERENCE && frequency >= 800)
+    )
+      return true;
+    return false;
+  }
+
+  firstCheck() {
+    this.isFirstCheck = false;
+    this.frequencyCounter++;
+    this.isHeaderChecking = true;
+    return;
   }
   skipCarrierTone() {
     this.startTimer = this.startTimer + this.durationPerDetection;
@@ -148,7 +205,7 @@ class Baudot extends Transform {
       this.currentFrequency = "LOW";
     }
   }
-  isThereChangesFrequency(frequency) {
+  checkFrequencyChange(frequency) {
     let freq = null;
     if (frequency >= HIGH_FREQUENCY_REFERENCE) {
       freq = "HIGH";
@@ -199,7 +256,7 @@ class Baudot extends Transform {
 
   countBytesFromFrequencyCounter() {
     if (this.frequencyCounter >= this.counterDivisor) {
-      return Math.round(this.frequencyCounter / this.counterDivisor);
+      return Math.floor(this.frequencyCounter / this.counterDivisor);
     } else {
       if (this.frequencyCounter >= 3) {
         return 1;
@@ -246,7 +303,7 @@ class Baudot extends Transform {
     }
   }
 
-  frequencyDetection() {
+  proccessStoredFrequency() {
     const numberOfCurrentBits = this.countBytesFromFrequencyCounter();
     for (let i = 0; i < numberOfCurrentBits; i++) {
       if (this.currentFrequency === "HIGH") {

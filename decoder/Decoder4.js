@@ -84,15 +84,20 @@ class Baudot extends Transform {
   detect(chunk) {
     const audioData = Array.from(chunk, (byte) => byte / 128 - 1);
     const frequency = this.calculateFrequency(audioData);
-    // console.log(this.frequencyCounter);
+    // console.log(frequency);
     if (frequency === 0) {
-      // if (this.zeroFrequencyCounter > 30) {
-      //   this.reset();
-      // } else {
-      //   this.zeroFrequencyCounter++;
-      // }
+      if (this.zeroFrequencyCounter > 30) {
+        // console.log("Ressetingggggggggg ==================================>");
+        this.reset();
+      } else {
+        this.zeroFrequencyCounter++;
+      }
     } else {
       this.zeroFrequencyCounter = 0;
+      // if (!this.isStart) {
+      //   this.start = true;
+
+      // }
       if (
         frequency >= HIGH_FREQUENCY_REFERENCE ||
         (frequency <= LOW_FREQUENCY_REFERENCE && frequency >= 500)
@@ -189,9 +194,7 @@ class Baudot extends Transform {
       }
       spectrum[k] = Math.sqrt(sumReal * sumReal + sumImag * sumImag);
     }
-    // console.log(spectrum);
     let dominantFrequencyIndex = spectrum.indexOf(Math.max(...spectrum));
-    // console.log(dominantFrequencyIndex);
     let dominantFrequency =
       dominantFrequencyIndex * (this.sampleRate / this.chunkSize);
     return dominantFrequency;
@@ -199,7 +202,7 @@ class Baudot extends Transform {
 
   countBytesFromFrequencyCounter() {
     if (this.frequencyCounter >= this.counterDivisor) {
-      return Math.round(this.frequencyCounter / this.counterDivisor);
+      return Math.floor(this.frequencyCounter / this.counterDivisor);
     } else {
       if (this.frequencyCounter >= 3) {
         return 1;
@@ -224,15 +227,16 @@ class Baudot extends Transform {
   }
 
   setBitValue(value) {
+    // console.log("Setting value", value, this.isHeaderChecking);
     if (this.isHeaderChecking && value === "1") {
+      // console.log("Disabling headerChecking");
       this.isHeaderChecking = false;
       this.tempByteHolder = this.tempByteHolder.concat(value);
       this.counter = this.counter + 1;
       this.frequencyBuffer = [];
-      return;
-    }
-    if (!this.isHeaderChecking) {
+    } else {
       if (this.counter > BAUDOT_BYTE_LENGTH) {
+        console.log(this.tempByteHolder);
         const baudotCode = this.extractBaudotBit(this.tempByteHolder);
         this.findLetter(baudotCode);
         this.tempByteHolder = value;
@@ -260,6 +264,7 @@ class Baudot extends Transform {
   }
 
   extractBaudotBit(input) {
+    // console.log(input);
     const range = input.substring(1, 6);
     const reversedRange = range.split("").reverse().join("");
     const reversedBytes = reversedRange
